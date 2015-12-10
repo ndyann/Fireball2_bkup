@@ -1,0 +1,19 @@
+#ifndef MESSAGE_FUNCTION_H
+#define MESSAGE_FUNCTION_H
+
+#define MPF_IP "127.0.0.1"
+#define MPF_PORT 3025
+
+#define TMTC_IP "127.0.0.1"
+
+
+//#define TMTC_PORT "/dev/ttyS0"
+//#define TMTC_BAUDRATE B9600
+
+void message_function(void *message_function_data);
+// establishes communication 
+// compute periods
+// set up loop.
+
+
+#endif // MESSAGE_FUNCTION_H

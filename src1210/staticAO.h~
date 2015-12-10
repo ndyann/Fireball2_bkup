@@ -1,0 +1,55 @@
+
+
+#ifndef STATICAO_H_
+#define STATICAO_H_
+
+// for debugging.
+#define DEBUG 1
+
+// 20151203 MM
+// Based on StaticDIAOv5 by JG
+/*
+  This header file defines some basic #defines and constants
+  
+ */
+
+// includes for various types that we may use
+//#include "../inc/compatibility.h"
+#include "../../../inc/bdaqctrl.h"
+using namespace Automation::BDaq;
+
+// device description
+#define deviceDescription L"PCI-1706, BID#0"
+
+// define which channel is which for the two analog signals we will be
+// sending out to the MPF 
+#define ELCHANNEL 0
+#define CECHANNEL 1
+// min and max voltage for the setting. 
+#define VRANGE V_Neg10To10
+#define MINV  -10
+#define MAXV 10
+
+// 11mV per arcsec
+#define ARCSECTOV 0.011
+
+
+// function declarations
+// Open and close the port. 
+int OpenAOPort(); 
+int CloseAOPort();
+
+
+// write to ports (raw)                                
+int AOWriteBoth(double cevolt, double elvolt);
+int AOWrite(int port, double value);
+
+// write to ports (arcseconds)
+int AOWriteArcsec(float cearcsec, float elarcsec);
+//int AOWriteArcsecPort(float arcsec);
+int AOWriteArcsecPort(int port, float arcsec);
+int AOWriteArcsecEL(float arcsec);
+int AOWriteArcsecCE(float arcsec);
+
+
+#endif

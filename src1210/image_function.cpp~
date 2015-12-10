@@ -1,0 +1,512 @@
+#include "image_function.h"
+#include "guide_data.h"
+#include "guiding_settings.h"
+#include "message_data.h"
+#include "staticAO.h"
+
+#include "frameblob.h"
+
+#include <algorithm>
+#include <math.h>
+#include <string.h>
+
+using namespace Automation::BDaq;
+
+pthread_mutex_t imagelock=PTHREAD_MUTEX_INITIALIZER;
+
+ void compute_elce(float specrot_radians, float specrot_zero_radians,float dx, float dy, float *el, float *ce){
+  static float srot, crot;
+  srot = sin(specrot_radians-specrot_zero_radians); 
+  crot = cos(specrot_radians-specrot_zero_radians);
+  (*el) = PLATESCALE*(crot*dx + -srot*dy*XY_RATIO);
+  (*ce) = PLATESCALE*(srot*dx + crot*dy*XY_RATIO);
+}
+
+void *image_function(void *guide_data){
+  static guide_data_t *gd; // extract the data
+  static unsigned short *image;
+  static int err, i;
+  static float x[MAXSTARS], y[MAXSTARS], f[MAXSTARS];
+  static unsigned char valid[MAXSTARS];
+  static unsigned char foundstars;
+  static unsigned long framenumber;
+  guiding_modes_t gm; 
+
+  static float dEL, dCE;
+  static float dx, dy, drot;
+
+  gd = (guide_data_t *)guide_data;
+  image = (*(*gd).cam_data).picbuf;
+
+  //  pthread_mutex_lock(&imagelock);
+
+  //  memset(x,0,sizeof x);
+  //  memset(y,0,sizeof y);
+  //  memset(f,0,sizeof f);
+  gm = (*(*gd).guide_settings).guide_mode;
+  switch(gm){
+    // acquisition phase 1 takes an image, finds a spot, and traps it
+  case  ACQUISITION_PHASE1:
+    printf("Calling acq_func with pointer to x: %d\n",x);
+    acq_func(image, 
+	     (*(*gd).cam_data).width,
+	     (*(*gd).cam_data).height,
+	     x,
+	     y,
+	     f,
+	     valid,
+	     &foundstars);
+    printf("x[0] = %f\n",x[0]);
+    // reset valid flag
+    memset((*gd).valid, 0, MAXSTARS);
+    if (foundstars>0) {
+      memset((*gd).valid, 1, foundstars);
+      memcpy((*gd).tx, x, foundstars);
+      memcpy((*gd).ty, y, foundstars);
+      memcpy((*gd).tf, f, foundstars);
+      // COMMENTED OUT TO TEST MULTISTAR
+      //      (*gd).nstars = 1;
+      //      (*(*gd).guide_settings).guide_mode = ACQUISITION_PHASE4;
+
+      (*gd).nstars = 2;
+      (*(*gd).guide_settings).guide_mode = MULTI_STAR;
+
+      // this may need to be a function later
+      for(i=0;i<foundstars;i++){
+	(*gd).tweight[i] = log(f[i]);
+      };
+      (*gd).starmask[0]=1;
+    };
+    break;
+  case  ACQUISITION_PHASE2:
+  case  ACQUISITION_PHASE3:
+  case  ACQUISITION_PHASE4:
+    printf("Calling acq_func with pointer to x: %d\n",x);
+    acq_func(image, 
+	     (*(*gd).cam_data).width,
+	     (*(*gd).cam_data).height,
+	     x,
+	     y,
+	     f,
+	     valid,
+	     &foundstars);
+    printf("x[0] = %f\n",x[0]);
+    break;
+  case MULTI_STAR:
+        track(image,
+	  (*(*gd).cam_data).width,
+	  (*(*gd).cam_data).height,
+	  (*gd).tx,(*gd).ty,
+	  valid,
+	  (*gd).boxes,
+	  (*gd).boxhs,
+	  (*gd).starmask,
+	  x, y);
+	break;
+  case MULTI_STAR_FOLLOW:
+    track(image,
+	  (*(*gd).cam_data).width,
+	  (*(*gd).cam_data).height,
+	  (*gd).lastx,(*gd).lasty,
+	  valid,
+	  (*gd).boxes,
+	  (*gd).boxhs,
+	  (*gd).starmask,
+	  x, y);
+    break;
+  default:
+    printf("Undefined guide mode\n");
+    exit(-1);
+    break;
+  };
+  // how many valid stars do we have? 
+  static int valcnt = 0;
+  for(i=0; i<MAXSTARS;i++)
+    if((*gd).valid[i] && (*gd).starmask[i]) valcnt++;
+
+  // temporary debug statement
+  for(i =0; i < MAXSTARS; i++)
+    if(valid[i])printf("%d %f %f %f\n",i,x[i],y[i],f[i]);
+  
+  if (valcnt > 0){
+    err = compute_mapping((*gd).tx,(*gd).ty,x,y,(*gd).tweight,valid,(*gd).nstars, &dx, &dy, &drot);
+    //*/
+    printf("After compute_mapping, x[0] = %f, dx = %f\n",x[0],dx);
+    err = 0;
+    if (err) {
+      dx = 0; dy =0; drot =0;
+      (*(*gd).mpf_data).mpf004.valid = 0;
+    } else { 
+      (*(*gd).mpf_data).mpf004.valid = 1;
+    };
+  } else { 
+    (*(*gd).mpf_data).mpf004.valid = 0;
+  }; // no valid data.
+
+  // if there are no valid stars, we will be outputting the same
+  // values as last time! (alternative would be 0, I guess?
+    (*gd).lastdx = dx;
+    (*gd).lastdy = dy;
+    (*gd).lastdrot = drot;
+    
+    printf("x[0] = %f\n",x[0]);
+    printf("dx = %f, dEl = %f, dCE = %f\n", dx,dEL,dCE);
+    
+    if((*(*gd).mpf_data).mpf002.valid){
+      compute_elce((*(*gd).mpf_data).mpf002.rotation*180./M_PI,
+		   0.0,
+		   dx, dy,
+		   &dEL, &dCE); 
+    } else {
+      compute_elce(0.0,
+		   0.0,
+		   dx, dy,
+		 &dEL, &dCE); 
+    };
+    
+    printf("dx = %f, dEl = %f, dCE = %f\n", dx,dEL,dCE);
+    
+  // this is where the coordinate update happens (i.e., previous a,d +
+  // the little change from dEL, dCE...
+  // not implemented 
+    
+  //update_coords(MPF.guide_alpha...
+  
+    (*(*gd).mpf_data).mpf003.alpha = 0;
+    (*(*gd).mpf_data).mpf003.delta = 0;
+    (*(*gd).mpf_data).mpf003.rotation = 17.3;
+     
+  AOWriteArcsec(dCE, dEL);
+
+  // messages sent to ground go here...
+    printf("%d, %ld, %f, %f, %f, %f, %f, %d, x=%f, tx=%f, y=%f, ty=%f\n",gm,framenumber,dx,dy,drot,dCE,dEL,(*gd).nstars,  x[0],  (*gd).tx[0],  y[0],  (*gd).ty[0]);
+
+  // store last
+  memcpy((void*) (*gd).lastx, x, MAXSTARS);
+  memcpy((void*) (*gd).lasty, y, MAXSTARS);
+  memcpy((void*) (*gd).lastf, f, MAXSTARS);
+
+  framenumber++;
+  //  pthread_mutex_unlock(&imagelock);
+};
+
+// this makes imdat.box a triple array: box[size][size][maxguidestars]
+int allocate_boxes(guide_data_t *imdat){
+  int i,j;
+  int size;
+  size =(*imdat).boxhs;
+  if (size < 2) return(-1);
+
+  //allocate
+  (*imdat).boxes = (unsigned short int ***)malloc(MAXSTARS*sizeof(uint16_t**));
+  // loop over rows
+  for (i=0;i<MAXSTARS;i++) {
+    // allocate
+    (*imdat).boxes[i] = (unsigned short int **)malloc((2*size+1) * sizeof(uint16_t*));
+    // loop over the number of boxes
+    for (j=0; j<2*size+1; j++) {
+      // allocate
+      (*imdat).boxes[i][j] = (unsigned short int*)malloc((2*size+1) * sizeof(uint16_t));
+    };
+  };
+
+  (*imdat).boxes_initialized = 1;
+  return 0;
+};
+
+// this de-allocates the memory structure
+int free_boxes(guide_data_t *imdat){
+  int i,j;
+  if (!(*imdat).boxes_initialized){
+    return -1;
+
+    // free up memory.
+    for(i=0;i<MAXSTARS;i++) {
+      for(j=0;j<(2*(*imdat).boxhs+1);j++) {
+	free((*imdat).boxes[i][j]);
+      };
+      free((*imdat).boxes[i]);
+    };
+    free((*imdat).boxes);
+  };   
+  (*imdat).boxes_initialized = 0;
+  return 0;
+};
+
+int compute_mapping(float *x0, float *y0, float *x1, float *y1, float *weight, unsigned char *valid, char points, float *dx, float *dy, float *drot){
+  printf("x[0] inside compute_mapping = %f\n",x0[0]);
+  static int i; // counter
+  // centroids
+  static float cx,cy, count;
+  static float sumx, sumy, sumweight, sumrot, crossp;
+  static float ux,uy,wx, wy;
+  cx =0; cy=0; count=0;
+  sumx =0; sumy=0; sumweight=0;
+  ux = 0; uy =0; wx=0; wy=0;
+  sumrot = 0; crossp = 0;
+  
+  // if number of points is 0 or 1, the return is obvious.
+  if (points == 0){
+    (*dx)=0;
+    (*dy)=0;
+    (*drot)=0;
+    return 0;
+  };
+  
+  if (points == 1){
+    (*dx) = x1[0]-x0[0];
+    (*dy) = y1[0]-y0[0];
+    (*drot) = 0;
+  };
+  
+  if (points > MAXSTARS) {
+    (*dx)=0;
+    (*dy)=0;
+    (*drot)=0;
+    return -1;
+  };
+  
+  // first compute the shift between the two sets of stars
+  for(i=0; i < points; i++) {
+    if(valid[i]){
+      sumweight += weight[i];
+      sumx += weight[i]*(x1[i]-x0[i]);
+      sumy += weight[i]*(y1[i]-y0[i]);
+      cx += x0[i];
+      cy += y0[i];
+      count++;
+    }; // if(valid)
+  }; // for i
+  // populate the dx and dy
+  (*dx) = sumx/sumweight;
+  (*dy) = sumy/sumweight;
+  cx = cx/count;
+  cy = cy/count;
+  // now the rotation.
+  for(i=0; i < points; i++ ){
+    if(valid[i]) { 
+      // residual offset between the two points
+      ux = x1[i]-x0[i]-(*dx);
+      uy = (y1[i]-y0[i]-(*dy))*XY_RATIO;
+	// vector from centroid to centerpont between stars
+      wx = (x1[i]-(*dx)+x0[i])/2.0-cx;
+      wy = ((y1[i]-(*dy)+y0[i])/2.0-cy)*XY_RATIO;
+      // cross product / w.w (gives atan of the angle, pretty much)
+      crossp = (ux*wy - uy*wx)/(wx*wx+wy*wy);
+      // "convert" to angle using first two terms of atan Taylor
+      // expansion and apply weights.  
+      sumrot += weight[i] * (crossp-crossp*crossp*crossp/3.0);
+    }; // if(valid)
+  }; // for i
+  (*drot) = sumrot/sumweight;
+  printf("dx when exiting computeelcel: %f\n",dx);
+  return 0;
+};
+
+// need to get these right. May end up needing to switch up which
+// function goes where and, possibly, signs. This all depends on how 
+
+
+void acq_func(uint16_t *buf,  int width, int height, float *x, float *y, float *flux, unsigned char *valid, unsigned char *nstars){
+  // This function extracts x, y, flux from MAXSTARS (8) brightest stars from an image in the buffer pointed by *buf                                
+  printf("Pointer to x inside the acq_function %d\n", x);
+  int i;
+  int stars_found;
+  bloblist *pBlobs;
+  unsigned int bits = 16;             // Image depth                                                                                         
+  uint16_t cam_sat = 65535;   // Pixel saturation value, is 2**bits                                                                          
+  float plate_scale = 1.0;   // For pixel coordinates                                                                                       
+  unsigned int coarse_grid = 50;  //coarse grid pixsize                                                                                      
+  unsigned int cen_box = 50;       //centroid box                                                                                            
+  unsigned int ap_box = 10;        //aperture box (for flux)                                                                                 
+  float sigma_thres = 5.0;        //sigma threshold for blob identification                                                                 
+  int dist_tol = 50;               //adjacent source distance tolerance in pixels                                                            
+
+  // Setting the frameblob for extracting blobs                                                                                                     
+  //printf("Setting blob structure...\n");
+  frameblob fblob(buf, width, height, bits, plate_scale);
+  fblob.clearblobs();
+  fblob.set_satval(cam_sat);
+  fblob.set_grid(coarse_grid);
+  fblob.set_cenbox(cen_box);
+  fblob.set_apbox(ap_box);
+  fblob.set_threshold(sigma_thres);
+  fblob.set_disttol(dist_tol*dist_tol);
+  //printf("... structure set\n");
+
+  // Extracting the blobs                                                                                                                           
+  //printf("Extracting blobls...\n");
+  fblob.calc_mapstat();
+  fblob.calc_searchgrid();
+  fblob.calc_centroid();
+  fblob.calc_flux();
+  fblob.fix_multiple();
+  fblob.sortblobs();
+  //printf("... blobs extracted\n");
+  stars_found = fblob.Numblobs();
+
+  // Print out how many sources have been identified                                                                                                
+  printf("Identified %d potential stars\n", stars_found);
+  // Initialize the valid tag to 0 (not valid)                                                                                                      
+  for (i = 0; i < MAXSTARS; i++){
+    valid[i]=0;
+  }
+  // Extracting the blobs to a             
+  pBlobs = fblob.getblobs();
+  *nstars = std::min(MAXSTARS, stars_found);
+  printf("Star positions\n");
+  // Update the pointers with the information on the fblob                                                                                          
+  for (i = 0; i < *nstars; i++){
+    x[i] = pBlobs->getx();
+    y[i] = pBlobs->gety();
+    flux[i] = pBlobs->getflux();
+    valid[i] = 1;
+    pBlobs = pBlobs->getnextblob();
+    //Prints (comment out later)                                                                                                                    
+    printf("x = %f, y = %f, flux = %f, valid = %d\n",x[i],y[i],flux[i],valid[i]);
+  }
+
+};
+
+
+/*
+void track(uint16_t * buf, int width, int height, float *tx, float *ty, unsigned char *valid, uint16_t ***boxes, unsigned short bhs, unsigned char *starmask, float *x, float *y){
+};
+*/
+
+
+void track(uint16_t *buf, int width, int height, float *tx, float *ty, unsigned char *valid,  uint16_t ***boxes, unsigned short bhs, unsigned char *starmask, float *x, float *y){
+  // indexes to move along arrays and pointers
+  static int buf_index, row, box, box_row, box_col;
+  // brightest pixel in array
+  static int x_max, y_max, pix_max , temp;
+  // centroid, background noise, signal-to-noise
+  static double x_cen, y_cen, f_cen, background, s_n, backgroundsq, backrms;
+  // parameters that won't change between function calls
+  static unsigned int cbhs = 2;  // half size of box used for centroiding
+  static double sigma = 1.5;     // threshols in s/n to change tag to non valid
+  static unsigned int pixval;
+  // zero out indexes
+  buf_index =0; row=0; box=0; box_row=0; box_col=0;
+  x_max=0; y_max=0; pix_max=0;
+  x_cen=0; y_cen=0; f_cen=0; background=0; s_n=0;
+  backgroundsq = 0;
+  backrms = 0;
+
+  //  printf("HELLO TRACK! %d\n",__LINE__);fflush(stdin);
+
+
+  for (box=0; box < MAXSTARS; box++){
+    //printf("Box = %d, valid = %d\n",box,starmask[box]);
+    if (starmask[box]==1 && tx[box]>(bhs) && tx[box]<(width-(bhs)) && ty[box]>(bhs) && ty[box]<(height-(bhs))){ //Only work with the stars we want (starmask ==1) or if the star is far enough from the chip border
+      //        printf("HELLO TRACK! %d\n",__LINE__);fflush(stdin);
+      box_row = 0;
+      x_max = 0;
+      y_max = 0;
+      pix_max = -1;
+      // going row by row for ech box to copy it and get coordinates for centroiding
+      for (row =int(ty[box])-(bhs); row <= int(ty[box])+(bhs); row++){
+        // copies a section of bytes from the mem block with the full image to the array 
+        buf_index = int(tx[box])-(bhs) + row * width;
+	//	  printf("HELLO TRACK! %d\n",__LINE__);fflush(stdin);
+	  memcpy(boxes[box][box_row],buf+buf_index,(2*bhs+1)*sizeof(uint16_t));
+	  //	    printf("HELLO TRACK! %d\n",__LINE__);fflush(stdin);
+	// gets the highest pixel of the row, compares it with the previous highest and updates
+	temp =*std::max_element(boxes[box][box_row],boxes[box][box_row]+(2*(bhs)+1));
+	if ( temp > pix_max){
+	  //Update highest pixel
+	  pix_max = temp;
+	  // could we just use this? x_max = (int) temp-boxes[box][box_row];
+	  x_max = std::distance(boxes[box][box_row],std::max_element(boxes[box][box_row],boxes[box][box_row]+(2*(bhs)+1)));
+	  y_max = box_row;
+	}
+	else {
+	  //Do nothing
+	}
+
+	//printf("box = %d, x_max = %d, y_max = %d, pixel_max = %d\n", box, x_max, y_max, pix_max);
+	//	printf("box_row %d\n",box_row);
+	box_row++;	
+      } // row loop
+      //	  printf("HELLO TRACK! %d\n",__LINE__);fflush(stdin);
+
+      // Only if the star is not too close to the edge of the box (determined by x_max and y_max) will we compute anything
+      if (x_max > cbhs && x_max < (2*(bhs)+1-cbhs) && y_max > cbhs && y_max < (2*(bhs)+1-cbhs)){
+        // looping through the pixels in the box to compute centroid (smaller box around pix_max
+        // and background for signal/noise calculation
+        x_cen = 0.0;
+        y_cen = 0.0;
+        f_cen = 0.0;
+        background = 0.0;
+        backgroundsq = 0.0;
+        // computes background (per pixel) and background-subtracted flux in cenbox
+        for(box_row = 0; box_row < (2*(bhs)+1); box_row++){
+          for(box_col = 0; box_col < (2*(bhs)+1); box_col++){
+            // pixels within cenbox contribute to centroid and signal calculation, rest contribute to noise/background
+	    pixval = boxes[box][box_row][box_col];
+            if(std::abs(y_max - box_row)<= cbhs && std::abs(x_max - box_col)<=cbhs){
+	      //        if(std::abs(*bhs - box_row)<= cbhs && std::abs(*bhs - box_col)<=cbhs){
+	      //	  f_cen = f_cen + boxes[box][box_row][box_col];
+	      //          x_cen = x_cen + box_col * (boxes[box][box_row][box_col]);
+	      //	  y_cen = y_cen + box_row * (boxes[box][box_row][box_col]);
+	      f_cen = f_cen + pixval;
+	      x_cen = x_cen + box_col * pixval;
+	      y_cen = y_cen + box_row * pixval;
+            }
+	    else {
+	      background = background + pixval;;
+	      backgroundsq = backgroundsq + (1.0*pixval)*pixval;
+	    } // if absolute values within centroid box
+          } // box_col
+        } // box row
+	//	  printf("HELLO TRACK! %d\n",__LINE__);fflush(stdin);
+
+        // calculation of signal-to-noise
+        background = background / ((2*(bhs)+1)*(2*(bhs)+1) - (2*cbhs+1)*(2*cbhs+1));
+        backgroundsq = backgroundsq / ((2*(bhs)+1)*(2*(bhs)+1) - (2*cbhs+1)*(2*cbhs+1));
+        backrms = std::sqrt(backgroundsq - background*background);
+        if(backrms < 1) backrms = 1;
+        // subtract background flux from centroid box
+        x_cen -= (2*cbhs+1)*background*(2*cbhs+1)*(2*cbhs)/2.0;
+        y_cen -= (2*cbhs+1)*background*(2*cbhs+1)*(2*cbhs)/2.0;
+        f_cen -= (2*cbhs+1)*(2*cbhs+1)*background;
+        if(f_cen < 1) f_cen = 1;
+        // normalizes centroid coordinates and transforms them in full chip coordinates
+        x_cen = x_cen / f_cen;
+        y_cen = y_cen / f_cen;
+        x_cen = x_cen + tx[box] - (bhs);
+        y_cen = y_cen + ty[box] - (bhs);
+        // first definition, using the brightest pixel vs. background
+        s_n = pix_max / backrms;
+        // second definition, using the total flux in cenbox
+        //background = background * (2*cbhs+1)*(2*cbhs+1);
+        //s_n = f_cen / background;
+        //printf("xmax = %d, ymax = %d, x_cen = %f, y_cen = %f, s/n = %f\n", x_max, y_max, x_cen, y_cen, s_n);
+        // if the signal-to-noise is too low, change valid[box] to 0 (non valid)
+        // first way to account for stars leaving the box, clouds... we can add conditions based
+        // on distance to border of box
+        if (s_n < sigma){
+          valid[box] = 0;
+        } // s_n < sigma
+        // update pointers x, y
+        x[box] = x_cen;
+        y[box] = y_cen;
+        //printf("Valid? %d\n", valid[box]);
+      }
+      else { // the star is too close to the edge of the box, do not update anything, just chage the valid tag
+        valid[box] = 0;
+      }
+      } // end of "if" loop telling  us to use that star
+    else if (starmask[box]==1){  //if starmask is 1 but did not enter the loop, the star was too close to the chip borders to draw a full box
+      valid[box] = 0;
+    };
+    printf("star: %d, x_cen: %f, y_cen: %f, s/n: %f, valid? %d\n",box,x_cen,y_cen,s_n,valid[box]);
+
+      } // end of loop over boxes
+
+}; // end of function
+
+
+
+
+
