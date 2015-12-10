@@ -1,0 +1,105 @@
+#include "gps.hpp"
+
+struct termios options_original;
+
+void		get_time(char *str,struct tm* t){    
+    char aux[10];
+	
+    strncpy(aux, &str[0], 2);
+    t->tm_year = 2000 + atoi(aux);
+    
+    strncpy(aux, &str[2], 2);
+    t->tm_mon  = 1 + atoi(aux);
+    
+    strncpy(aux, &str[4], 2);
+    t->tm_mday = atoi(aux);
+    
+    strncpy(aux, &str[6], 2);
+    t->tm_hour = atoi(aux);
+    
+    strncpy(aux, &str[8], 2);
+    t->tm_min = atoi(aux);
+    
+    strncpy(aux, &str[10], 2);
+    t->tm_sec = atoi(aux);
+}
+void		get_pos(char* str, float& lat,float& log){
+    char aux[10];
+    strncpy(aux, &str[12], 5);
+    lat = atoi(aux);
+    
+    strncpy(aux, &str[18], 5);
+    log = atoi(aux);
+}
+uint32_t	get_usb_ro(int& fd,int baud){
+	struct termios options;
+	char aux[500];
+	log(__FUNCTION__,OK,"Trying to open USB port "+string(GPS_PORT)+" as read only");
+	fd = open(GPS_PORT,O_RDONLY);
+	
+	if (fd == -1)	{
+		sprintf(aux,"Unable to open USB port %s as read only. Check its read permission for current user. errno: %x",GPS_PORT,errno);
+		return log(__FUNCTION__,ERROR,string(aux));
+	} else {
+		log(__FUNCTION__,OK,"Port "+string(GPS_PORT)+" successfully openned");
+		if (-1 == tcgetattr(fd,&options_original)) { //options_original is define as global
+			return log(__FUNCTION__,ERROR,"Could not get "+string(GPS_PORT)+" attributes");
+		}
+		else {
+			/*
+			 should be the same as "options = options_original;", but faster/safer.
+			 An even safer option would be to repeat
+			 if (-1 == tcgetattr(fd,&options))
+				log(__FUNCTION__,OK,"Could not get "+string(GPS_PORT)+" attributes");
+			 but that's a lot slower.
+			 */
+			memcpy((void*)&options,(void*)&options_original,sizeof(options_original)); 
+			log(__FUNCTION__,OK,"Successfully read attributes from "+string(GPS_PORT));
+			if (-1 == cfsetispeed(&options, baud)){
+				sprintf(aux,"Could not set baud rate to %d on port %s. errno: %x",baud,GPS_PORT,errno);
+				log(__FUNCTION__,WARNING,string(aux));
+			}
+			options.c_cflag |= (CLOCAL | CREAD);
+			options.c_lflag |= ICANON;
+			if (-1 == tcsetattr(fd, TCSANOW, &options)){
+				sprintf(aux,"Could not set attributes on port %s. errno: %x",GPS_PORT,errno);
+				log(__FUNCTION__,WARNING,string(aux));
+			}
+		}
+		log(__FUNCTION__,OK,"Leaving function to open USB port "+string(GPS_PORT));
+		return OK;
+	}
+}
+uint32_t	get_string(int fd,char str[30]){
+	char aux[500];
+	sprintf(aux,"Trying to read %d bytes from descriptor %d",GPS_BYTES,fd);
+	log(__FUNCTION__,OK,string(aux));
+	
+    int n;
+	if (-1 == (n = read(fd, str, GPS_BYTES))){
+		sprintf(aux,"Failed to read %d bytes. errno: %x",GPS_BYTES,errno);
+		return log(__FUNCTION__,ERROR,string(aux));
+	} else {
+		sprintf(aux,"Read %d out of %d requested. string: %s",n,GPS_BYTES,str);
+		log(__FUNCTION__,OK,string(aux));
+	}
+    if(-1 == ioctl(fd, I_FLUSH, FLUSHR)){
+		sprintf(aux,"Attempting to flush buffer failed. errno: %x",errno);
+		return log(__FUNCTION__,ERROR,string(aux));
+	} else {
+		log(__FUNCTION__,OK,"Flushed buffer");
+	}
+	log(__FUNCTION__,OK,"Leaving function");
+	return OK;
+}
+uint32_t	close_usb(int fd){
+	if (-1 == tcsetattr(fd,TCSANOW,&options_original)) { //options_original is define as global
+		log(__FUNCTION__,WARNING,"Could not reset attributes for "+string(GPS_PORT)+" to the original state");
+	}
+	if (-1 == close(fd)){
+		char aux[500];
+		sprintf(aux,"Error closing %s to the original state. errno: %x",GPS_PORT,errno);
+		return log(__FUNCTION__,WARNING,string(aux));
+	}
+	return OK;
+}

@@ -1,0 +1,31 @@
+#include "cambinning.h"
+
+
+uint32_t PCO_GetBinning(CPco_cl_com *cam, uint16_t *binningx, uint16_t *binningy){
+  SC2_Simple_Telegram com;
+  SC2_Set_Binning_Respose resp;
+  
+  com.wCode = GET_BINNING;
+  com.wSize = sizeof(com);
+  
+  err = *cam.Control_Command(&com,sizeof(com),&resp,sizeof(resp));
+  if(err==PCO_NOERROR){
+    *binningx = resp.wBinningx;
+    *binningy = resp.wBinningy;
+  };
+  return err;
+};
+
+uint32_t PCO_SetBinning(CPco_cl_com *cam, uint16_t binningx, uint16_t binningy){
+  SC2_Set_Binning com;
+  SC2_Set_Binning_Respose resp;
+
+  com.wCode = SET_BINNING;
+  com.wSize = sizeof(com);
+  com.wBinningx = binningx;
+  com.wBinningy = binningy;
+
+  err = *cam.Control_Command(&com,sizeof(com),&resp,sizeof(resp));
+  
+  return err;
+};

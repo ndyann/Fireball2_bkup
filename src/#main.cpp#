@@ -1,0 +1,163 @@
+//
+//  MINT
+//	Main Program
+//
+//  Created by Lucas Sousa de Oliveira on 7/2/12.
+//  Property of NASA - Goddard Space Flight Center
+//
+//	Edited by Joe Gibson on 01/29/2014
+//
+
+/*
+ Errors are divided into 4 categories:
+ OK         -> No error
+ WARNING    -> Barely an error
+ ERROR      -> An actual error, try again.
+ FATAL      -> Crictical error, the program can't go on.
+ */
+
+//JZ. I added include to play with screen messages
+#include <iostream>
+//JZ. End of added code
+
+#include "main.hpp"
+
+#if CAMERA
+CPco_cl_com camera;
+CPco_me4_edge grabber;
+#endif
+
+int main (int argc, const char * argv[]){
+#if CAMERA
+    	uint16_t* p_img = NULL;
+#endif
+
+	unsigned int c_ok = NOTHING;
+    
+    struct tm timeinfo;
+    char time1[500],name[500],aux[500];
+	
+	/* Setting the SIGINT treatment. If a ctrl-c is sent to the program,
+	 the function terminate would close all the devices and connections. */
+    	if (signal (SIGINT, terminate) == SIG_IGN)
+        	signal (SIGINT, SIG_IGN);
+    
+#if CAMERA
+	log(__FUNCTION__,OK,"Connect to camera");
+    	start_camera(camera,grabber); //Critical action
+    	camera.PCO_SetDelayExposure(CAM_WAIT_FRAME,CAM_EXPOSURE); // Edit from Maxime 12/26/2013
+#endif
+    
+	//Capture images and save to FITS
+	c_ok = -1;
+    
+    for (long unsigned int i = 0; i < (long unsigned int)CAM_GRAB_N_PICS; i++) {
+        sprintf(aux,"Capture image number %lu",i);
+        log(__FUNCTION__,OK,string(aux));
+
+#if FITS
+
+		log(__FUNCTION__,OK,"Forming filename using system time information");
+		time_t rawtime;
+		time(&rawtime);
+		timeinfo = *localtime(&rawtime);
+		
+		strftime(time1, 500, ("!"HOMEPATH"/imgs/%Y-%m-%d_%H-%M-%S_%%06d.fits"),&timeinfo);
+		sprintf(name,time1,clock()%CLOCKS_PER_SEC);
+		
+		log(__FUNCTION__,OK,"Filename formed. Result: "+string(name));
+#endif   
+
+        if (true) {
+			log(__FUNCTION__,OK,"Grab new frame");
+#if CAMERA
+			
+            c_ok = grab_single(&grabber,&p_img);
+			
+			if(c_ok == OK)
+			{
+				log(__FUNCTION__, OK, "Grabbed new frame successfully");
+			}
+			else
+			{
+				log(__FUNCTION__, OK, "Error: Could not grab new frame");
+			}
+			            //JZ. Here we already have grabbed a frame and can work with it
+				    using namespace std;
+				    cout << "After calling grab_single function we can work with the image:" << endl;
+				    cout <<  "p_img = " << p_img << endl;
+				    cout << "Address of p_img: " << &p_img << endl;
+				    //cout << "Size of pointer p_img: " << sizeof(p_img) << endl;
+				    //cout << "Size of data in pointer: " << sizeof(*p_img) << endl;
+				    cout << "image = " << p_img[0] << "," << p_img[1] << "," << p_img[5529599] << endl;
+				    uint16 anImage[2] = { 0 };
+				    cout << "image = " << anImage[0] << "," << endl;
+
+				    //JZ. End of added code
+
+#if FITS
+            if(c_ok == OK)  {
+                uint16_t att;
+				log(__FUNCTION__, OK, "Attempting to save image.");
+
+				for(c_ok = NOTHING, att = 0;
+                    c_ok != OK && ++att < MAX_RETRY;
+                    c_ok = save_ptr2fits(name,2560,2160,p_img));
+
+                
+                if (c_ok != OK){
+                    sprintf(aux,"Could not save image '%s' in %d tries",name,MAX_RETRY);
+                    log(__FUNCTION__,ERROR,aux);
+                }
+            }
+			else
+			{
+				log(__FUNCTION__, OK, "Error: Could not grab new frame");
+			}
+#endif
+									
+            if (p_img != NULL){
+				log(__FUNCTION__, OK, "Freeing image buffer (Unverifiable)");
+                free(p_img);
+			}
+			else
+			{
+				fprintf(stderr, "Could not free image buffer\n");
+				fflush(stderr);
+				log(__FUNCTION__, OK, "Error: Could not free image buffer: Image buffer was unallocated");
+			}
+
+#endif
+        } else {
+            ;
+        }
+
+		log(__FUNCTION__,OK,"Waiting 1 second before next frame (cycle should have approx 1 Hz)");
+
+		// JZ. It is here where we can modify the wait between frames
+
+		sleep(1);
+	}
+	
+#if CAMERA
+	//Freeing resources used by camera and grabber.
+	log(__FUNCTION__,OK,"Close camera connection and free resources");
+	if (close_camera(camera,grabber) == OK)
+		log(__FUNCTION__,OK,"Closed camera");
+	else
+		log(__FUNCTION__,ERROR,"COULD NOT close camera");
+#endif
+    
+    return 0;
+}
+
+void terminate (int signum) {
+    log(__FUNCTION__,OK,"Terminating program!");
+    if (signum == SIGINT) {
+
+#if CAMERA
+        close_camera(camera,grabber);
+#endif
+        exit(signum);
+    }
+}

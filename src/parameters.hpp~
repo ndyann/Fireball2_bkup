@@ -1,0 +1,46 @@
+//
+//  MINT
+//	Main header
+//
+//  Created by Lucas Sousa de Oliveira on 9/5/12.
+//  Property of NASA - Goddard Space Flight Center
+//
+
+#ifndef rubble_mint_parameters
+#define rubble_mint_parameters
+/* Don't change this */
+#define ENABLE  1
+#define DISABLE 0
+
+/* CHANGE ONLY BELOW THIS LINE */
+
+/* The path for the program */
+#ifndef HOMEPATH
+#define HOMEPATH "/home/salo/0.Jose/2.mintguider/0.Versions/2015.07.15/mint_camera_only"
+#endif
+
+/* Enable/Disable specific devices */
+#define LOGGING	ENABLE		// Enable the logging functions
+#define CAMERA		ENABLE		// Enable capturing frames from PCO.Edge camera
+#define FITS		ENABLE		// Enable saving file as FITS
+#define DEBUG		DISABLE		// Enable waiting on error
+#define LOG2SCREEN	ENABLE		// Enable printing logs to stdout
+
+/* Global parameters */
+#define MAX_RETRY	10		// attempts. Max number of tries to open camera and grab frame.
+
+/* Camera parameters */
+#define CAM_GRAB_N_PICS		1	// frames (-1 = infinite)
+#define CAM_WAIT_FRAME		1000	// milliseconds. Time to wait for frame before raising timeout error.
+#define CAM_EXPOSURE		10	// milliseconds 
+
+/* Guiding parameters */
+#define GUIDE_LONG_EXPOSURE	2000	// milliseconds. Exposure used at the beginning of guidance for star acquisition
+#define GUIDE_EXPOSURE		2000	// milliseconds. Exposure used during guidance
+#define GUIDE_WINDOWS		3	// number of windows to clip frames during star extraction
+#define GUIDE_WINDOW_SIZE       100      // pixels. Size of square window to clip frames during star extraction
+
+/* Lost in Space parameters */
+
+
+#endif

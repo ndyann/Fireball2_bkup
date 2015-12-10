@@ -1,0 +1,11 @@
+
+#include <stdio.h>
+#include <iostream>
+
+
+int main (int argc, const char * argv[]{
+   printf("Entering the z_guide program\n");
+   printf("Exiting the z_guide program\n");
+
+   return 0;
+}

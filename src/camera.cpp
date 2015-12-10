@@ -1,0 +1,534 @@
+//
+//  MINT
+//	Wrapper for the PCO.Edge camera libraries
+//
+//  Adapted from the library's sample codes.
+//
+//  Created by Lucas Sousa de Oliveira on 07/11/12.
+//  Property of NASA - Goddard Space Flight Center
+//
+
+/*
+//JZ. Include ios to printout in screen
+#include <iostream>
+//JZ. End of added code
+*/
+
+#include "camera.hpp"
+
+CPco_Log pco_log("pco_edge_grab.log");
+
+uint32_t    start_camera        (CPco_cl_com& camera,CPco_me4_edge& grabber){
+    uint32_t err = OK;
+    uint16_t att = 0;
+    char aux[1000];
+    
+	/* Tries to open camera MAX_RETRY times. If MAX_RETRY attempts
+	 are made of a FATAL error is risen, the function is shut. */
+	log(__FUNCTION__,OK,"Entering start_camera");
+    for (att = 1; att <= MAX_RETRY && err != FATAL; att++)   {
+        sprintf(aux,"Attempt #%3d of opening the camera.",att);
+        log(__FUNCTION__,OK,aux);
+		
+		//Debug - JJG
+		sleep(1);
+        
+        uint32_t pixelrate;
+        uint32_t width,height;
+        PCO_SC2_CL_TRANSFER_PARAM clpar;
+        
+        camera.log  = &pco_log;
+        grabber.log = &pco_log;
+        
+		err = log(__FUNCTION__,OK,"Opening camera");
+        err = camera.Open_Cam(0);
+        if(err == PCO_NOERROR)  {
+            log(__FUNCTION__,OK,"Camera opened");
+        }   else    {                  
+            sprintf(aux,"Could not open camera. Msg: 0x%x",err);
+            log(__FUNCTION__,ERROR, aux);
+            continue;
+        }
+    
+		err = log(__FUNCTION__,OK,"Opening frame grabber");
+		int board;
+		board = 0;
+		err = grabber.Open_Grabber(board);
+        if(err == PCO_NOERROR){
+            log(__FUNCTION__,OK,"Grabber opened");
+        }   else    {
+            sprintf(aux,"Could not open grabber. Msg: 0x%x",err);
+			log(__FUNCTION__,ERROR, string(aux));
+			
+			log(__FUNCTION__,OK,"Closing camera");
+            camera.Close_Cam();
+			log(__FUNCTION__,OK,"Camera closed");
+            continue;
+        }
+	
+	camera.PCO_SetRecordingState(0);
+		err = log(__FUNCTION__,OK,"Arming camera");
+        err = camera.PCO_ArmCamera();
+        if(err == PCO_NOERROR)  {
+            log(__FUNCTION__,OK,"Camera armed");
+        }   else    {
+            sprintf(aux,"Could not arm camera. Msg: 0x%x",err);
+            log(__FUNCTION__,WARNING, string(aux));
+        }
+        
+		err = log(__FUNCTION__,OK,"Getting size of the image sent by the camera");
+        err = camera.PCO_GetActualSize(&width,&height);
+        if(err == PCO_NOERROR)	{
+            sprintf(aux,"Image size is %ux%u.",width,height);
+            log(__FUNCTION__,OK,string(aux));
+        }   else    {
+            sprintf(aux,"Could not get image size. Msg: 0x%x",err);
+            log(__FUNCTION__,WARNING, string(aux));
+        }
+        
+		err = log(__FUNCTION__,OK,"Getting pixel rate");
+        err = camera.PCO_GetPixelRate(&pixelrate);
+        if(err == PCO_NOERROR)	{
+            sprintf(aux,"Pixel rate is %u.",pixelrate);
+            log(__FUNCTION__,OK,string(aux));
+        }   else    {
+            sprintf(aux,"Could not get pixel rate from camera. Msg: 0x%x",err);
+            log(__FUNCTION__,WARNING, string(aux));
+        }
+    
+		err = log(__FUNCTION__,OK,"Computing data format");
+        if((width>1920)&&(pixelrate>=286000000))	{
+            clpar.DataFormat=SCCMOS_FORMAT_TOP_CENTER_BOTTOM_CENTER|PCO_CL_DATAFORMAT_5x12;
+            sprintf(aux,"width>1920 %d && pixelrate >=286000000 %d Dataformat 0x%x.",width,pixelrate,clpar.DataFormat);
+            log(__FUNCTION__,OK,string(aux));
+        }
+        else                                        {
+            clpar.DataFormat=SCCMOS_FORMAT_TOP_CENTER_BOTTOM_CENTER|PCO_CL_DATAFORMAT_5x16;
+            sprintf(aux,"width<=1920 %d || pixelrate <286000000 %d Dataformat 0x%x.",width,pixelrate,clpar.DataFormat);
+            log(__FUNCTION__,OK,string(aux));
+        }
+        
+		err = log(__FUNCTION__,OK,"Setting transfer parameters");
+        err = camera.PCO_SetTransferParameter(&clpar,sizeof(clpar));
+        if(err == PCO_NOERROR){
+            log(__FUNCTION__,OK,"Transfer parameters set.");
+        }   else    {
+            sprintf(aux,"Could not set transfer parameter. Msg: 0x%x",err);
+            log(__FUNCTION__,WARNING, string(aux));
+        }
+        
+		log(__FUNCTION__,OK,"Arming camera again");
+        err = camera.PCO_ArmCamera();
+        if(err == PCO_NOERROR){
+            log(__FUNCTION__,OK,"Camera armed.");
+        }   else    {
+            sprintf(aux,"Could not arm camera. Msg: 0x%x",err);
+            log(__FUNCTION__,WARNING, string(aux));
+        }
+        
+		err = log(__FUNCTION__,OK,"Setting data format");
+        err = grabber.Set_DataFormat(clpar.DataFormat);
+        if(err == PCO_NOERROR)
+            log(__FUNCTION__,OK,"Data format set.");
+        else                    {
+            sprintf(aux,"Could not set data format. Msg: 0x%x",err);
+            log(__FUNCTION__,WARNING, string(aux));
+        }
+        
+		sprintf(aux,"Setting image size expected by the grabber to %dx%d",width,height);
+		err = log(__FUNCTION__,OK,string(aux));
+        err = grabber.Set_Grabber_Size(width,height);
+        if(err == PCO_NOERROR)  
+            log(__FUNCTION__,OK,"Set image size on grabber.");
+        else                    {
+            sprintf(aux,"Could not set image size on grabber. Msg: 0x%x",err);
+            log(__FUNCTION__,WARNING, string(aux));
+        }
+        
+		/* Attempts to allocate a frame buffer for 20 frames. If not successful,
+		 tries the same for n-1 frames while n>0. */
+		err = log(__FUNCTION__,OK,"Attempting to allocate 20 frame buffers (default from windows program)");
+        unsigned int i = 0;
+        err = WARNING;
+        for(i = 20; i > 0 && err != OK; i--)	{ //OK should mean that the framebuffer was allocated
+            if((err = grabber.Allocate_Framebuffer(i)) == PCO_NOERROR)
+                err = log(__FUNCTION__,OK,"Frame buffer allocated.");
+            else				{
+				if (i > 1){
+					sprintf(aux,"Could not allocate frame buffer for %d frames. Trying again for %d frame buffers. Msg: 0x%x",i,i-1,err);
+					err = log(__FUNCTION__,WARNING, string(aux));
+				} else {
+					sprintf(aux,"Could not allocate frame buffer at all! Msg: 0x%x",err);
+					return log(__FUNCTION__,ERROR, string(aux));
+				}
+            }
+        }
+		
+        err = log(__FUNCTION__,OK,"Setting recording state to 1 (ON)");
+        err = camera.PCO_SetRecordingState(1);
+        if(err == PCO_NOERROR)
+            err = log(__FUNCTION__,OK,"Recoding state set to 1 (ON)");
+        else                    {
+            sprintf(aux,"Could not set recording state. Msg; 0x%x",err);
+            err = log(__FUNCTION__,ERROR, string(aux));
+        }
+        
+        if (err == OK)
+            break;
+    }
+    
+	/* If it reaches the end of the function with after attempting MAX_RETRY times,
+	 it means it wasn't successful. */
+    if (att == MAX_RETRY) {
+        err = log(__FUNCTION__, ERROR, "Reached maximum number of attempts to connect to the camera.");
+    }
+	log(__FUNCTION__, OK, "Leaving start_camera");
+    return err;
+}
+uint32_t    close_camera        (CPco_cl_com& camera,CPco_me4_edge& grabber){
+	char aux[1000];
+    int err = OK;
+	
+	log(__FUNCTION__, OK, "Entering close_camera");
+	
+	err = log(__FUNCTION__,OK,"Freeing frame buffer");
+	err = grabber.Free_Framebuffer();
+	if (err == PCO_NOERROR) {
+		log(__FUNCTION__,OK,"Freed frame buffer successfully.");
+	} else {
+		sprintf(aux,"Could not free frame buffer. Msg: 0x%x",err);
+		log(__FUNCTION__,WARNING, string(aux));
+	}
+	
+	err = log(__FUNCTION__,OK,"Setting recording state to 0 (OFF)");
+	err = camera.PCO_SetRecordingState(0);
+	if(err == PCO_NOERROR)
+		log(__FUNCTION__,OK,"Successfully set recording state to 0 (OFF)");
+	else {
+		sprintf(aux,"Could not set recording state to 0 (OFF). Msg: 0x%x",err);
+		log(__FUNCTION__,WARNING, string(aux));
+	}
+    
+	err = log(__FUNCTION__,OK,"Closing frame grabber. Unverifiable.");
+	err |= (grabber.Close_Grabber() == PCO_NOERROR)?OK:ERROR;
+	err = log(__FUNCTION__,OK,"Closing camera. Unverifiable.");	//@todo Should this be err |= ? err flag is not maintained through closing grabber and camera...
+	err |= (camera.Close_Cam() == PCO_NOERROR)?OK:ERROR;
+	log(__FUNCTION__,OK,"Leaving close_camera\n");
+	return err;
+}
+uint32_t    grab_single         (CPco_me4 *grabber,uint16_t** buf) {
+	uint32_t err;
+	char aux[1000];
+	int picnum;
+	unsigned int w,h;
+	uint16_t *adr;
+	uint16_t *picbuf = NULL;
+    
+     err = log(__FUNCTION__,OK,"Entering grab_single");
+    
+	picnum = 1;
+	err = log(__FUNCTION__,OK,"Start aquire");
+ 	err = grabber->Start_Aquire(1);
+	if(err == PCO_NOERROR)
+		log(__FUNCTION__, OK,"Started capturing frames");
+	else {
+		sprintf(aux,"Could not start frame capture. Msg: 0x%x",err);
+		return log(__FUNCTION__, ERROR, string(aux));
+	}
+    
+	sprintf(aux,"Waiting for image (%d miliseconds)",CAM_WAIT_FRAME);
+	err = log(__FUNCTION__,OK,string(aux));
+	err = grabber->Wait_For_Image(&picnum,CAM_WAIT_FRAME);
+	if(err == PCO_NOERROR)	{
+		log(__FUNCTION__, OK,"Image retrived");
+	} else {
+		sprintf(aux,"No image retrieved after waiting 100ms. Msg: 0x%x",err);
+		log(__FUNCTION__, ERROR, string(aux));
+		err = log(__FUNCTION__, OK, "Stoping frame aquisition");
+        err = grabber->Stop_Aquire();
+		if (err == PCO_NOERROR)	err = log(__FUNCTION__, OK, "Stopped frame aquisition");
+		else {
+			sprintf(aux,"Could not stop frame aquisition. Msg: 0x%x",err);
+			err = log(__FUNCTION__, ERROR, string(aux));
+		}
+		return ERROR;
+	}
+	
+	/* I'm not sure what this is about, but is a source of errors. */
+     err = log(__FUNCTION__, OK, "Checking DMA length");
+ 	err = grabber->Check_DMA_Length(picnum);
+	if(err == PCO_NOERROR)
+		log(__FUNCTION__, OK,"DMA length is OK.");
+	else {
+		sprintf(aux,"Checking DMA length returned an error. Msg: 0x%x",err);
+        err = grabber->Stop_Aquire();
+		return log(__FUNCTION__, ERROR, string(aux));
+	}
+    
+	err = log(__FUNCTION__, OK, "Getting frame buffer address");
+ 	err = grabber->Get_Framebuffer_adr(picnum,(void**)&adr);
+	if(err == PCO_NOERROR)
+		log(__FUNCTION__, OK, "Frame buffer address was successfully retrieved");
+	else {
+		sprintf(aux,"Could not get frame buffer address. Msg: 0x%x",err);
+        err = grabber->Stop_Aquire();
+		return log(__FUNCTION__, ERROR, string(aux));
+	}
+    
+	err = log(__FUNCTION__, OK, "Stopping frame aquisition");
+ 	err = grabber->Stop_Aquire();
+	if(err == PCO_NOERROR)
+		log(__FUNCTION__, OK,"Stopped frame aquisition");
+	else {
+		sprintf(aux,"Could not stop frame capture. Msg: 0x%x",err);
+		log(__FUNCTION__, WARNING, string(aux));
+	}
+ 	
+	err = log(__FUNCTION__, OK, "Getting actual image size");
+ 	err = grabber->Get_actual_size(&w,&h,NULL);
+	if(err == PCO_NOERROR){
+		sprintf(aux,"Got frame size (%ux%u) from grabber.",w,h);
+		log(__FUNCTION__, OK, string(aux));
+	} else {
+		sprintf(aux,"Could not get frame size from grabber. Msg: 0x%x",err);
+		return log(__FUNCTION__, ERROR, string(aux));
+	}
+  	
+	sprintf(aux,"Allocatting %ux%ux%u bytes buffer for image.",w,h,sizeof(WORD));
+	err = log(__FUNCTION__, OK, string(aux));
+	picbuf = (WORD*)malloc(w*h*sizeof(WORD));
+	/*
+	// JZ. Let's see what is picbuf
+	using namespace std;
+	cout << "Now memory has been allocated for the image" << endl;
+	cout << "Memory address of picbuf: " << &picbuf << endl;
+	cout << "Byte size of picbuf: " << sizeof(picbuf) << endl;
+	cout << "picbuf= " << picbuf << endl;
+	cout << "Bytesize of data picbuf: " << sizeof(*picbuf) << endl;
+	cout << "content picbuf= " << *picbuf << endl;
+	//JZ. End of added code
+	*/
+  	if(picbuf != NULL){
+		sprintf(aux,"Allocated %ux%ux%u bytes buffer for image.",w,h,sizeof(WORD));
+		err = log(__FUNCTION__, OK, string(aux));
+	} else {
+		sprintf(aux,"Could not allocate %ux%ux%ubytes buffer for image. Msg: 0x%x",w,h,sizeof(WORD),err);
+		return log(__FUNCTION__, ERROR, string(aux));
+	}
+    
+	log(__FUNCTION__, OK, "Extracting image from grabber into buffer (Unverifiable)");
+	grabber->Extract_Image(picbuf,adr,w,h);
+	/*
+	//JZ. In principle now the image is in the buffer
+	using namespace std;
+	cout << "Now the image has been extracted to buffer picbuf" << endl;
+	cout << "Memory address of picbuf: " << &picbuf << endl;
+	cout << "Byte size of picbuf: " << sizeof(picbuf) << endl;
+	cout << "picbuf= " << picbuf << endl;
+	cout << "Bytesize of data picbuf: " << sizeof(*picbuf) << endl;
+	cout << "Content of picbuf= " << *picbuf << endl;
+	//cout << "Content of picbuf++= " << *picbuf++ << endl;
+	//JZ. End added code
+	*/
+	log(__FUNCTION__, OK, "Retrieving timestamp from frame (Unverifiable)");
+	picnum = img_nr_from_tmstamp(picbuf,0);
+	/* There's no way to check this!!! */
+	sprintf(aux,"Image (timestamp img_nr %d) successfully extracted from frame grabber\n",picnum);
+	log(__FUNCTION__, OK, string(aux));
+    
+	*buf = picbuf;
+	
+	log(__FUNCTION__, OK, "Leaving grab_single");
+	
+	return OK;
+}
+int         img_nr_from_tmstamp (void *buf,int shift){
+	unsigned short *b;
+	int y;
+	int image_nr=0;
+	b=(unsigned short *)(buf);
+	y=100*100*100;
+	for(;y>0;y/=100)
+	{
+		*b>>=shift;
+		image_nr+= (((*b&0x00F0)>>4)*10 + (*b&0x000F))*y;
+		b++;
+	}
+	return image_nr;
+}
+uint32_t    log_camera_info     (CPco_cl_com& camera,CPco_me4_edge& grabber){
+    char aux[500],aux2[500];
+    int err;
+    uint16_t act_recstate;
+    uint32_t exp_time,delay_time,pixelrate;
+    uint32_t width,height,secs,nsecs;
+    PCO_SC2_CL_TRANSFER_PARAM clpar;
+    double freq;
+    SHORT ccdtemp,camtemp,pstemp;
+    uint16_t camtype;
+    uint32_t serialnumber;
+    uint16_t actlut,lutparam;
+    
+    err = camera.PCO_GetInfo(1,aux2,sizeof(aux2));
+    if(err == PCO_NOERROR) {
+        sprintf(aux,"Cardname       : %s",aux2);
+        log(__FUNCTION__,INFO,aux);
+    } else log(__FUNCTION__,WARNING,"Could not run PCO_GetInfo");
+    
+    err = camera.PCO_GetCameraType(&camtype,&serialnumber);
+    if (err == PCO_NOERROR) {
+        sprintf(aux,"Serial number  : %d",serialnumber);
+        log(__FUNCTION__,INFO,aux);
+    } else log(__FUNCTION__,WARNING,"Could not run PCO_GetCameraType");
+    
+    err = camera.PCO_GetTransferParameter(&clpar,sizeof(clpar));
+    if (err == PCO_NOERROR) {
+        sprintf(aux,"Baudrate       : %d",clpar.baudrate);
+        log(__FUNCTION__,INFO,aux);
+        
+        sprintf(aux,"Clockfrequency : %d",clpar.ClockFrequency);
+        log(__FUNCTION__,INFO,aux);
+        
+        sprintf(aux,"Dataformat     : %d",clpar.DataFormat);
+        log(__FUNCTION__,INFO,aux);
+        
+        sprintf(aux,"Transmit       : %d",clpar.Transmit);
+        log(__FUNCTION__,INFO,aux);
+    } else log(__FUNCTION__,WARNING,"Could not run PCO_GetTransferParameter");
+    
+    err = camera.PCO_GetTemperature(&ccdtemp,&camtemp,&pstemp);
+    if(err == PCO_NOERROR)  {
+        sprintf(aux,"Sensor         : %lf",(double)ccdtemp/10);
+        log(__FUNCTION__,INFO,aux);
+        
+        sprintf(aux,"Camera         : %d",camtemp);
+        log(__FUNCTION__,INFO,aux);
+        
+        sprintf(aux,"PowerSupply    : %d",pstemp);
+        log(__FUNCTION__,INFO,aux);
+    } else log(__FUNCTION__,WARNING,"Could not run PCO_GetTemperature");
+    
+    err = camera.PCO_GetActualSize(&width,&height);
+    if(err == PCO_NOERROR)  {
+        sprintf(aux,"Actual Resolution: %d x %d",width,height);
+        log(__FUNCTION__,INFO,aux);
+    } else log(__FUNCTION__,WARNING,"Could not run PCO_GetActualSize");
+    
+    err = camera.PCO_GetPixelRate(&pixelrate);
+    if(err == PCO_NOERROR)  {
+        sprintf(aux,"actual PixelRate: %u",pixelrate);
+        log(__FUNCTION__,INFO,aux);
+    } else log(__FUNCTION__,WARNING,"Could not run PCO_GetPixelRate");
+    
+    if((width>1920)&&(pixelrate>=286000000)) {
+        clpar.DataFormat=SCCMOS_FORMAT_TOP_CENTER_BOTTOM_CENTER|PCO_CL_DATAFORMAT_5x12;
+        sprintf(aux,"width>1920 %d && pixelrate >=286000000 %d Dataformat 0x%x",width,pixelrate,clpar.DataFormat);
+        log(__FUNCTION__,INFO,aux);
+    } else {
+        clpar.DataFormat=SCCMOS_FORMAT_TOP_CENTER_BOTTOM_CENTER|PCO_CL_DATAFORMAT_5x16;
+        sprintf(aux,"width<=1920 %d || pixelrate<286000000 %d Dataformat 0x%x",width,pixelrate,clpar.DataFormat);
+        log(__FUNCTION__,INFO,aux);
+    }
+    
+    err = camera.PCO_GetLut(&actlut,&lutparam);
+    if(err == PCO_NOERROR)  {
+        sprintf(aux,"Dataformat 0x%x and LUT 0x%x",actlut,lutparam);
+        log(__FUNCTION__,INFO,aux);
+    } else log(__FUNCTION__,WARNING,"Could not run PCO_GetLut");
+    
+    camera.PCO_GetRecordingState(&act_recstate);
+    camera.PCO_GetDelayExposure(&delay_time,&exp_time);
+    camera.PCO_GetCOCRuntime(&secs,&nsecs);
+    
+    freq=nsecs;
+    freq/=1000000000;
+    freq+=secs;
+    freq=1/freq;
+    sprintf(aux,"actual recording state %s actual freq: %.3lfHz %.2lfMB/sec\n",act_recstate ? "RUN" : "STOP",freq,(freq*width*height*2)/(1024*1024));
+    log(__FUNCTION__,INFO,aux);
+    
+    return OK;
+}
+uint32_t    get_camera_info		(CPco_cl_com& camera,CPco_me4_edge& grabber,float info[8]){
+	enum cam_info {ccd,cam,pst,wid,hei,rec,del,exp};
+	
+    int		err;
+	char	aux[500];
+	bool	ok[4] = {true};
+	uint32_t iaux[3];
+    
+	err = log(__FUNCTION__,OK,"Trying to get the temperature information");
+    err = camera.PCO_GetTemperature(((int16_t*)(iaux+0)),((int16_t*)(iaux+1)),((int16_t*)(iaux+2)));
+    if(err == PCO_NOERROR)  {
+		info[ccd] = (float) *((int16_t*)(iaux+0))/10.0; //ccd
+		info[cam] = (float) *((int16_t*)(iaux+1));	//cam
+		info[pst] = (float) *((int16_t*)(iaux+2));	//ps
+    } else {
+		info[ccd] = NAN;
+		info[cam] = NAN;
+		info[pst] = NAN;
+		log(__FUNCTION__,WARNING,"Could not run PCO_GetTemperature");
+		ok[0] = false;
+	}
+	
+	err = log(__FUNCTION__,OK,"Getting image size");
+	err = camera.PCO_GetActualSize(iaux+0,iaux+1);
+    if(err == PCO_NOERROR)  {
+        info[wid] = (float) (iaux[0]); //width
+		info[hei] = (float) (iaux[1]); //height
+    } else{
+		info[wid] = NAN;
+		info[hei] = NAN;
+		log(__FUNCTION__,WARNING,"Could not run PCO_GetActualSize");
+		ok[1] = false;
+	}
+	
+	err = log(__FUNCTION__,OK,"Getting recording state");
+	err = camera.PCO_GetRecordingState(((uint16_t*)(iaux+0)));
+    if(err == PCO_NOERROR)  {
+        info[rec] = (float) *((uint16_t*)(iaux+0)); //rec_State
+    } else{
+		info[rec] = NAN;
+		log(__FUNCTION__,WARNING,"Could not run PCO_GetRecordingState");
+		ok[2] = false;
+	}
+	
+	err = log(__FUNCTION__,OK,"Getting delay and exposure times");
+	err = camera.PCO_GetDelayExposure(iaux,iaux+1);
+    if(err == PCO_NOERROR)  {
+        info[del] = (float) (iaux[0]); //delay
+		info[exp] = (float) (iaux[1]); //exposure
+    } else{
+		info[del] = NAN; //delay
+		info[exp] = NAN; //exposure
+		log(__FUNCTION__,WARNING,"Could not run PCO_GetDelayExposure");
+		ok[3] = false;
+	}
+	
+    if (ok[0]) {
+		sprintf(aux,"Sensor         : %f",info[ccd]);
+		log(__FUNCTION__,INFO,aux);
+		sprintf(aux,"Camera         : %f",info[cam]);
+		log(__FUNCTION__,INFO,aux);
+		sprintf(aux,"PowerSupply(?) : %f",info[pst]);
+		log(__FUNCTION__,INFO,aux);
+	}
+	if (ok[1]) {
+		sprintf(aux,"Width			: %f",info[wid]);
+        log(__FUNCTION__,INFO,aux);
+		sprintf(aux,"Height			: %f",info[hei]);
+        log(__FUNCTION__,INFO,aux);
+	}
+	if (ok[2]) {
+		sprintf(aux,"Recording State: %f",info[rec]);
+        log(__FUNCTION__,INFO,aux);
+	}
+	if (ok[3]) {
+		sprintf(aux,"Delay			: %f",info[del]);
+        log(__FUNCTION__,INFO,aux);
+		sprintf(aux,"Exposure Time	: %f",info[exp]);
+        log(__FUNCTION__,INFO,aux);
+	}
+    
+    return OK;
+}

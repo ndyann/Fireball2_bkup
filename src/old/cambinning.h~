@@ -1,0 +1,10 @@
+#ifndef CAM_BINNING_H
+#define CAM_BINNING_H
+
+//#include "../lib/pco_classes/Cpco_cl_com.h"
+
+uint32_t PCO_GetBinning(CPco_cl_com *cam, uint16_t *binningx, uint16_t *binningy);
+uint32_t PCO_SetBinning(CPco_cl_com *cam, uint16_t binningx, uint16_t binningy);
+
+
+#endif
