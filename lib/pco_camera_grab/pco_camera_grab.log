@@ -1,0 +1,22 @@
+pco_camera_grab.log logfile started
+14:16:09 14.07.2015
+
+ 0x1 Open_Cam_Ext: ManufacturerName Silicon Software
+ 0x1 Open_Cam_Ext: PortIdentifier 0: siso_me4_0
+ 0x1 Open_Cam_Ext: PortIdentifier 1: siso_me4_1
+0x100 scan_camera: baudrate scan with GET_CAMERA_TYPE
+0x100 ERROR Control_Command: pclSerialRead size:4 back 0 error = -10004
+0x100 scan_camera: try again baudrate 9600
+0x100 ERROR Control_Command: pclSerialRead size:4 back 0 error = -10004
+0x100 scan_camera: test baudrate 19200
+0x100 ERROR Control_Command: pclSerialRead size:4 back 0 error = -10004
+0x100 scan_camera: test baudrate 38400
+0x100 ERROR Control_Command: pclSerialRead size:4 back 0 error = -10004
+0x100 scan_camera: test baudrate 57600
+0x100 ERROR Control_Command: pclSerialRead size:4 back 0 error = -10004
+0x100 scan_camera: test baudrate 115200
+0x100 scan_camera: baudrate set to 115200
+0x100 get_actual_cl_config: GET_INTERFACE_OUTPUT_FORMAT err 0x0 format 0x100
+0x100 get_lut_info: camera has 3 luts installed
+Log ended 14:27.50 14.07.2015
+
