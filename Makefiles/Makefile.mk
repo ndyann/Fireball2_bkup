@@ -1,0 +1,56 @@
+# Makefile for programs in this directory
+
+CXX = g++
+
+CODE_PATH = ./src
+PCODIR = ./lib/pco_include
+PCOLIBDIR = ./lib/pco_lib
+CPCODIR = ./lib/pco_classes
+SISOLIB = ./lib/siso_lib
+
+C11FLAG += -std=c++0x
+CFLAGS += -O -Wall -Wno-comments -DLINUX -I$(PCODIR) -I$(CPCODIR)
+
+CLSERLIB = $(SISOLIB)/libclserme4.so
+FGLIB = $(SISOLIB)/libfglib5.so
+ 
+DISPLIB = $(PCOLIBDIR)/libpcodisp.a
+LOGLIB = $(PCOLIBDIR)/libpcolog.a
+FILELIB = $(PCOLIBDIR)/libpcofile.a
+
+HEADERS = $(PCODIR)/VersionNo.h $(CPCODIR)/Cpco_cl_com.h $(CPCODIR)/Cpco_me4.h $(CPCODIR)/Cpco_me4_GS.h
+
+CPCOCLASS_SRC = Cpco_cl_com.cpp Cpco_me4.cpp reorder_func.cpp
+CPCOCLASS = $(addprefix $(CPCODIR)/,$(CPCOCLASS_SRC) )
+
+SOURCES = $(CODE_PATH)/*.cpp
+
+TARGETS = testcam
+
+all:    clean $(TARGETS)
+
+clean:
+		@echo "Cleaning make (safety reasons)..."
+		@$(RM) *~ bin/$(TARGETS)  $(CPCODIR)/*~  *.log *.o
+        
+%.o: src/%.cpp
+		@echo -n "Compiling1 "$<"..."
+		@$(CXX) $(C11FLAG) $(CFLAGS) src/log.cpp $< -c
+		@echo " Done1"
+        
+%.o: src/%.c
+		@echo -n "Compiling2 "$<"..."
+		@$(CC) $(CFLAGS) $< -c
+		@echo " Done2"
+    
+testcam:	src/testcam.cpp fireball_camera.o  $(FGLIB) $(CLSERLIB) $(CPCOCLASS) $(FILELIB) $(LOGLIB) $(HEADERS)
+		@echo "Compiling testcam..."
+		@$(CXX) $(C11FLAG) $(CFLAGS) $? -o bin/testcam -I./src/ $(FILELIB) $(LOGLIB) $(FGLIB) $(CLSERLIB) 
+
+
+run_testcam:	clean testcam
+		@echo "Running testcam..."
+		@bash -l -c "if [ `pgrep testcam | wc -l` -lt 2 ]; then ./bin/testcam; else echo 'Instance already running!'; fi;"
+		
+run_test:       testcam
+		./bin/testcam
