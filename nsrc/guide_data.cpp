@@ -1,0 +1,55 @@
+#include "guide_data.h"
+#include <math.h>
+
+void init_guide_data(guide_data_t *gd){
+  int i=0;
+  (*gd).nstars = 1;
+  for(i=0;i<MAXSTARS;i++){
+    (*gd).tx[i]=0;
+    (*gd).ty[i]=0;
+    (*gd).tf[i]=2;
+    (*gd).valid[i]=0;
+    (*gd).starmask[i]=0;
+    (*gd).tweight[i]=1;
+  };
+  (*gd).lastdx = 0;
+  (*gd).lastdy = 0;
+  (*gd).dx = 0;
+  (*gd).dy = 0;
+  (*gd).boxhs=25;
+  (*gd).framenumber=0;
+  allocate_boxes(gd);
+  return;
+};
+
+inline float compute_weight(float val){
+  if(val>0) { 
+    return log(val);
+  } else {
+    return 0;
+  };
+};
+
+
+void copy_guide_data(guide_data_t *gt, guide_data_t *gs){
+  int i;
+  for(i=0;i<MAXSTARS;i++){
+    (*gt).tx[i] = (*gs).tx[i];
+    (*gt).ty[i] = (*gs).ty[i];
+    (*gt).tf[i] = (*gs).tf[i];
+    (*gt).tweight[i] = (*gs).tweight[i];
+    (*gt).valid[i] = (*gs).valid[i];
+    (*gt).x[i] = (*gs).x[i];
+    (*gt).y[i] = (*gs).y[i];
+    (*gt).f[i] = (*gs).f[i];
+    (*gt).starmask[i] = (*gs).starmask[i];
+  };
+  (*gt).lastdx = (*gs).lastdx;
+  (*gt).lastdy = (*gs).lastdy;
+  (*gt).dEL = (*gs).dEL;
+  (*gt).dCE = (*gs).dCE;
+  (*gt).nstars = (*gs).nstars;
+  (*gt).boxhs = (*gs).boxhs;
+  free_boxes(gt);
+  (*gt).boxes = (*gs).boxes;
+};

@@ -1,0 +1,28 @@
+#ifndef IMAGE_FUNCTION_H
+#define IMAGE_FUNCTION_H
+
+#include "guide_data.h"
+
+#define DEFAULTBOX 25
+#define XY_RATIO 1.0
+#define PLATESCALE 1.22
+
+// thies is the worker function for image analysis.
+void *image_function(void *guide_data);
+
+// functions to allocate memory for boxes and set pointers.
+int make_boxes(guide_data_t *imdat, int size);
+int nuke_boxes(guide_data_t *imdat);
+
+int compute_mapping(float *x0, float *y0, float *x1, float *y1, float *weight,unsigned char *valid, int points, float *dx, float *dy, float *rot);
+
+int compute_elce(float specrot_radians, float dx, float dy, float *el, float *ce);
+
+
+void acq_func(uint16_t *buf, int width, int height, float *x, float *y, float *flux, unsigned char *valid, unsigned char *nstars);
+
+void track(uint16_t * buf, unsigned int width, unsigned int height, float *tx, float *ty, unsigned char *valid, uint16_t ***boxes, unsigned short bhs, unsigned char *starmask);
+
+
+
+#endif
